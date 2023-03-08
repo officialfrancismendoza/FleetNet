@@ -193,7 +193,10 @@ class FlockNode:
         for neighbor_id in self.neighbors:
             neighbor = network[neighbor_id]
             neighbor.remove_neighbor(self.id)
-
+#--------------------------------------------------------------------------------------
+# Set up the initial network distribution
+# 10-node network initial distribution as GossipNode object, indexes 0-9
+# Index is THE raw value
 # Set up the network
 network = {}
 for i in range(10):
@@ -202,10 +205,11 @@ for i in range(10):
     velocity = (random.uniform(-1, 1), random.uniform(-1, 1))
     node = FlockNode(i, neighbors, position, velocity)
     network[i] = node
-    for neighbor_id in neighbors:
-        neighbor = network[neighbor_id]
-        neighbor.add_neighbor(i)
-
+    
+for selfID, neighborNodes in network.items():
+    for neighborID in neighborNodes.neighbors:
+        network[neighborID].add_neighbor(selfID)
+#--------------------------------------------------------------------------------------
 # Choose a random subset of nodes to be Byzantine
 num_byzantine_nodes = 3
 byzantine_nodes = set(random.sample(range(10), num_byzantine_nodes))
