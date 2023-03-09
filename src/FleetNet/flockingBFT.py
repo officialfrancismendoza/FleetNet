@@ -1,228 +1,122 @@
 import random
-import time
-from collections import defaultdict
+import math
 
-class FlockNode:
-    def __init__(self, id, neighbors, position, velocity):
-        self.id = id
-        self.neighbors = set(neighbors)
-        self.status = "alive"
-        self.position = position
-        self.velocity = velocity
-        self.leader = None
-        self.flockmates = set()
-        self.message_queue = []
+# Define the number of agents
+NUM_NODES = 10
 
-    def add_neighbor(self, node_id):
-        self.neighbors.add(node_id)
+# Define the communication range
+COMM_RANGE = 5
 
-    def remove_neighbor(self, node_id):
-        self.neighbors.discard(node_id)
+# Define the number of faulty agents
+NUM_BYZANTINE = math.floor(NUM_NODES * 0.3)
 
-    def update_position(self):
-        self.position = (self.position[0] + self.velocity[0], self.position[1] + self.velocity[1])
+# Define the distance function
+def euclideanDistance(agent1, agent2):
+    dx = agent1['x'] - agent2['x']
+    dy = agent1['y'] - agent2['y']
+    return (dx ** 2 + dy ** 2) ** 0.5
 
-    def gossip(self, network):
-        if self.status == "dead":
-            return
+# Define the communication protocol
+def messageBroadcast(agent, message):
+    for neighbor in nodes:
+        if neighbor != agent and euclideanDistance(agent, neighbor) < COMM_RANGE:
+            neighbor['inbox'].append(message)
 
-        # Check if leader has been elected
-        if self.leader is None:
-            self.check_leader()
+def receiveMessages(agent):
+    messages = agent['inbox']
+    agent['inbox'] = []
+    return messages
 
-        # Check if flockmates have been identified
-        if not self.flockmates:
-            self.identify_flockmates()
+# Implement the flocking behavior
+def flock(agent):
+    neighbors = []
+    for neighbor in nodes:
+        if neighbor != agent and euclideanDistance(agent, neighbor) < COMM_RANGE:
+            neighbors.append(neighbor)
+    alignment = align(agent, neighbors)
+    cohesion = cohere(agent, neighbors)
+    separation = separate(agent, neighbors)
+    agent['vx'] += alignment[0] + cohesion[0] + separation[0]
+    agent['vy'] += alignment[1] + cohesion[1] + separation[1]
 
-        # Update position
-        self.update_position()
+def align(agent, neighbors):
+    avg_vx = 0
+    avg_vy = 0
+    for neighbor in neighbors:
+        avg_vx += neighbor['vx']
+        avg_vy += neighbor['vy']
+    if len(neighbors) > 0:
+        avg_vx /= len(neighbors)
+        avg_vy /= len(neighbors)
+    return (avg_vx - agent['vx'], avg_vy - agent['vy'])
 
-        # Send position and velocity to flockmates
-        message = {"type": "position", "node_id": self.id, "position": self.position, "velocity": self.velocity}
-        for flockmate_id in self.flockmates:
-            flockmate = network[flockmate_id]
-            flockmate.receive_message(self.id, message)
+def cohere(agent, neighbors):
+    avg_x = 0
+    avg_y = 0
+    for neighbor in neighbors:
+        avg_x += neighbor['x']
+        avg_y += neighbor['y']
+    if len(neighbors) > 0:
+        avg_x /= len(neighbors)
+        avg_y /= len(neighbors)
+    return (avg_x - agent['x'], avg_y - agent['y'])
 
-    def receive_message(self, sender_id, message):
-        if self.status == "dead":
-            return
+def separate(agent, neighbors):
+    avg_dx = 0
+    avg_dy = 0
+    for neighbor in neighbors:
+        dx = agent['x'] - neighbor['x']
+        dy = agent['y'] - neighbor['y']
+        dist = euclideanDistance(agent, neighbor)
+        if dist > 0:
+            weight = 1 / dist
+            avg_dx += weight * dx
+            avg_dy += weight * dy
+    return (avg_dx, avg_dy)
 
-        message_type = message["type"]
-        if message_type == "position":
-            position = message["position"]
-            velocity = message["velocity"]
+# Define the fault-tolerance mechanism
+def checkByzantine(agent):
+    faulty = False
+    for neighbor in nodes:
+        if neighbor != agent and euclideanDistance(agent, neighbor) < COMM_RANGE:
+            if neighbor['faulty']:
+                faulty = True
+    return faulty
 
-            # Add sender to flockmates
-            self.flockmates.add(sender_id)
+def recover(agent):
+    count = 0
+    for neighbor in nodes:
+        if neighbor != agent and euclideanDistance(agent, neighbor) < COMM_RANGE:
+            if not neighbor['faulty']:
+                count += 1
+    if count > NUM_NODES - NUM_BYZANTINE - 1:
+        agent['faulty'] = False
 
-            # Update position and velocity
-            self.position = position
-            self.velocity = velocity
-
-            # Send position and velocity to all neighbors
-            for neighbor_id in self.neighbors:
-                if neighbor_id != sender_id:
-                    neighbor = network[neighbor_id]
-                    neighbor.receive_message(self.id, message)
-
-        elif message_type == "leader":
-            leader_id = message["leader_id"]
-
-            # If this node has not yet elected a leader, update its leader status
-            if self.leader is None:
-                self.leader = leader_id
-
-            # If the received leader is better than the current leader, update the leader status
-            if leader_id < self.leader:
-                self.leader = leader_id
-
-            # Broadcast leader status to all neighbors
-            for neighbor_id in self.neighbors:
-                if neighbor_id != sender_id:
-                    neighbor = network[neighbor_id]
-                    neighbor.receive_message(self.id, message)
-
-    def check_leader(self):
-        message = {"type": "leader", "node_id": self.id, "leader_id": self.id}
-
-        # Send message to random neighbor
-        neighbor_id = random.choice(list(self.neighbors))
-        neighbor = network[neighbor_id]
-        neighbor.receive_message(self.id, message)
-
-    def identify_flockmates(self):
-        # Collect positions of all neighbors
-        positions = []
-        for neighbor_id in self.neighbors:
-            if neighbor_id != self.id:
-                neighbor = network[neighbor_id]
-                positions.append(neighbor.position)
-
-        # Calculate distance to all neighbors
-        distances = {}
-        for position in positions:
-            distance = ((position[0] - self.position[0])**2 + (position[1] - self.position[1])**2)**0.5
-            distances[position] = distance
-
-        # Find the closest neighbors
-        closest_positions = sorted(distances, key=distances.get)[:3]
-        flockmates = set()
-        for neighbor_id in self.neighbors:
-            if neighbor_id != self.id:
-                neighbor = network[neighbor_id]
-                if neighbor.position in closest_positions:
-                    flockmates.add(neighbor_id)
-
-        # Send flockmates to all neighbors
-        message = {"type": "flockmates", "node_id": self.id, "flockmates": flockmates}
-        for neighbor_id in self.neighbors:
-            neighbor = network[neighbor_id]
-            neighbor.receive_message(self.id, message)
-
-    def receive_leader(self, sender_id, leader_id):
-        if self.status == "dead":
-            return
-
-        # If this node has not yet elected a leader, update its leader status
-        if self.leader is None:
-            self.leader = leader_id
-
-        # If the received leader is better than the current leader, update the leader status
-        if leader_id < self.leader:
-            self.leader = leader_id
-
-        # Broadcast leader status to all neighbors
-        for neighbor_id in self.neighbors:
-            if neighbor_id != sender_id:
-                neighbor = network[neighbor_id]
-                neighbor.receive_leader(self.id, self.leader)
-
-    def receive_message(self, sender_id, message):
-        if self.status == "dead":
-            return
-
-        message_type = message["type"]
-        if message_type == "position":
-            position = message["position"]
-            velocity = message["velocity"]
-
-            # Add sender to flockmates
-            self.flockmates.add(sender_id)
-
-            # Update position and velocity
-            self.position = position
-            self.velocity = velocity
-
-            # Send position and velocity to all neighbors
-            for neighbor_id in self.neighbors:
-                if neighbor_id != sender_id:
-                    neighbor = network[neighbor_id]
-                    neighbor.receive_message(self.id, message)
-
-        elif message_type == "leader":
-            leader_id = message["leader_id"]
-
-            # If this node has not yet elected a leader, update its leader status
-            if self.leader is None:
-                self.leader = leader_id
-
-            # If the received leader is better than the current leader, update the leader status
-            if leader_id < self.leader:
-                self.leader = leader_id
-
-            # Broadcast leader status to all neighbors
-            for neighbor_id in self.neighbors:
-                if neighbor_id != sender_id:
-                    neighbor = network[neighbor_id]
-                    neighbor.receive_message(self.id, message)
-
-        elif message_type == "flockmates":
-            flockmates = message["flockmates"]
-
-            # Update flockmates
-            self.flockmates.update(flockmates)
-
-            # Send flockmates to all neighbors
-            for neighbor_id in self.neighbors:
-                if neighbor_id != sender_id:
-                    neighbor = network[neighbor_id]
-                    neighbor.receive_message(self.id, message)
-
-    def die(self):
-        self.status = "dead"
-        for neighbor_id in self.neighbors:
-            neighbor = network[neighbor_id]
-            neighbor.remove_neighbor(self.id)
 #--------------------------------------------------------------------------------------
 # Set up the initial network distribution
 # 10-node network initial distribution as GossipNode object, indexes 0-9
 # Index is THE raw value
-# Set up the network
-network = {}
-for i in range(10):
-    neighbors = set(random.sample(range(10), random.randint(1, 3)))
-    position = (random.uniform(0, 10), random.uniform(0, 10))
-    velocity = (random.uniform(-1, 1), random.uniform(-1, 1))
-    node = FlockNode(i, neighbors, position, velocity)
-    network[i] = node
-    
-for selfID, neighborNodes in network.items():
-    for neighborID in neighborNodes.neighbors:
-        network[neighborID].add_neighbor(selfID)
+nodes = []
+for i in range(NUM_NODES):
+    nodes.append({'x': random.uniform(-10, 10), 'y': random.uniform(-10, 10), 'vx': 0, 'vy': 0, 'inbox': [], 'faulty': False})
+    print("NODES: ", nodes)
+    print("-----------------------------------")
+
 #--------------------------------------------------------------------------------------
 # Choose a random subset of nodes to be Byzantine
-num_byzantine_nodes = 3
-byzantine_nodes = set(random.sample(range(10), num_byzantine_nodes))
-print("Byzantine nodes:", byzantine_nodes)
-
-# Start the flocking process
+# Arbitrary 33% case of BFT, still holds
 for i in range(100):
-    for node in network.values():
-        if node.id in byzantine_nodes:
-            # Byzantine node sends random leader to neighbors
-            neighbor_id = random.choice(list(node.neighbors))
-            neighbor = network[neighbor_id]
-            leader_id = random.choice(list(network.keys()))
-            neighbor.receive_leader(node.id, leader_id)
-        else:
-            node.gossip(network)
+    for agent in nodes:
+        if not agent['faulty']:
+            flock(agent)
+            messageBroadcast(agent, {'x': agent['x'], 'y': agent['y'], 'vx': agent['vx'], 'vy': agent['vy']})
+            messages = receiveMessages(agent)
+            for message in messages:
+                if checkByzantine(message):
+                    agent['faulty'] = True
+                    break
+            if not agent['faulty']:
+                recover(agent)
+            agent['x'] += agent['vx']
+            agent['y'] += agent['vy']
+#--------------------------------------------------------------------------------------
