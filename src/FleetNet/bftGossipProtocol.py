@@ -1,4 +1,5 @@
 import random
+import math
 import time
 from collections import defaultdict
 
@@ -17,7 +18,7 @@ class GossipNode:
 
     def remove_neighbor(self, node_id):
         self.neighbors.discard(node_id)
-
+        
     def gossip(self, network):
         if self.status == "dead":
             return
@@ -93,29 +94,32 @@ class GossipNode:
             neighbor = network[neighbor_id]
             neighbor.remove_neighbor(self.id)
 
-# Set up the network
-network = {}
+#--------------------------------------------------------------------------------------
+# Set up the initial network distribution
+# 10-node network initial distribution as GossipNode object, indexes 0-9
+# Index is THE raw value
+gossipNodeNetwork = {}
 for i in range(10):
+    # Initialize random set of neighbors for each node, unique elements
     neighbors = set(random.sample(range(10), random.randint(1, 3)))
+    print("ITERATION #: ", i)
+    print("Neighbors:", neighbors)
+    
+    # Initialize node with neighbors
     node = GossipNode(i, neighbors)
-    network[i] = node
-    for neighbor_id in neighbors:
-        neighbor = network[neighbor_id]
-        neighbor.add_neighbor(i)
+    gossipNodeNetwork[i] = node
+    print("GossipNode Network:", gossipNodeNetwork)
+    
+    print("-----------------------------------")
+    
+# Bijective add-back from neighbors to original node
+for selfId, gossipNodes in gossipNodeNetwork.items():
+    for neighborID in gossipNodes.neighbors:
+        gossipNodeNetwork[neighborID].add_neighbor(selfId)
 
+#--------------------------------------------------------------------------------------
 # Choose a random subset of nodes to be Byzantine
-num_byzantine_nodes = 3
+# Arbitrary 33% case of BFT, still holds
+num_byzantine_nodes = math.floor(len(gossipNodeNetwork) * 0.3)
 byzantine_nodes = set(random.sample(range(10), num_byzantine_nodes))
 print("Byzantine nodes:", byzantine_nodes)
-
-# Start the gossip process
-for i in range(100):
-    for node in network.values():
-        if node.id in byzantine_nodes:
-            # Byzantine node sends random leader to neighbors
-            neighbor_id = random.choice(list(node.neighbors))
-            neighbor = network[neighbor_id]
-            leader_id = random.choice(list(network.keys()))
-            neighbor.receive_leader(node.id, leader_id)
-        else:
-            node.gossip(network)
