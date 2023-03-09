@@ -4,34 +4,53 @@ import math
 # Define the number of agents
 NUM_NODES = 10
 
-# Define the communication range
+# Define the communication range (meters)
 COMM_RANGE = 5
 
 # Define the number of faulty agents
 NUM_BYZANTINE = math.floor(NUM_NODES * 0.3)
 
 # Define the distance function
-def euclideanDistance(agent1, agent2):
+def distance(agent1, agent2):
     dx = agent1['x'] - agent2['x']
     dy = agent1['y'] - agent2['y']
     return (dx ** 2 + dy ** 2) ** 0.5
 
 # Define the communication protocol
-def messageBroadcast(agent, message):
-    for neighbor in nodes:
-        if neighbor != agent and euclideanDistance(agent, neighbor) < COMM_RANGE:
+def randomLeaderElection():
+    return random.choice(agents)
+
+def broadcastMessage(agent, message):
+    leader = randomLeaderElection()
+    for neighbor in agents:
+        if neighbor != agent and distance(agent, neighbor) < COMM_RANGE:
             neighbor['inbox'].append(message)
 
 def receiveMessages(agent):
     messages = agent['inbox']
     agent['inbox'] = []
     return messages
+    
+# Multicast message behavior
+def multicastMessage(agent, message):
+    messages = receiveMessages(agent)
+    leader = randomLeaderElection()
+    for neighbor in agents:
+        if neighbor != agent and neighbor == leader and distance(agent, neighbor) < COMM_RANGE:
+            for message in messages:
+                neighbor['inbox'].append(message)
+    for message in messages:
+        if checkByzantine(message):
+            agent['faulty'] = True
+            break
+    if not agent['faulty']:
+        recover(agent)
 
 # Implement the flocking behavior
 def flock(agent):
     neighbors = []
-    for neighbor in nodes:
-        if neighbor != agent and euclideanDistance(agent, neighbor) < COMM_RANGE:
+    for neighbor in agents:
+        if neighbor != agent and distance(agent, neighbor) < COMM_RANGE:
             neighbors.append(neighbor)
     alignment = align(agent, neighbors)
     cohesion = cohere(agent, neighbors)
@@ -67,7 +86,7 @@ def separate(agent, neighbors):
     for neighbor in neighbors:
         dx = agent['x'] - neighbor['x']
         dy = agent['y'] - neighbor['y']
-        dist = euclideanDistance(agent, neighbor)
+        dist = distance(agent, neighbor)
         if dist > 0:
             weight = 1 / dist
             avg_dx += weight * dx
@@ -77,16 +96,16 @@ def separate(agent, neighbors):
 # Define the fault-tolerance mechanism
 def checkByzantine(agent):
     faulty = False
-    for neighbor in nodes:
-        if neighbor != agent and euclideanDistance(agent, neighbor) < COMM_RANGE:
+    for neighbor in agents:
+        if neighbor != agent and distance(agent, neighbor) < COMM_RANGE:
             if neighbor['faulty']:
                 faulty = True
     return faulty
 
 def recover(agent):
     count = 0
-    for neighbor in nodes:
-        if neighbor != agent and euclideanDistance(agent, neighbor) < COMM_RANGE:
+    for neighbor in agents:
+        if neighbor != agent and distance(agent, neighbor) < COMM_RANGE:
             if not neighbor['faulty']:
                 count += 1
     if count > NUM_NODES - NUM_BYZANTINE - 1:
@@ -96,25 +115,23 @@ def recover(agent):
 # Set up the initial network distribution
 # 10-node network initial distribution as GossipNode object, indexes 0-9
 # Index is THE raw value
-nodes = []
+agents = []
+faulty_agents = random.sample(range(NUM_NODES), NUM_BYZANTINE)
 for i in range(NUM_NODES):
-    nodes.append({'x': random.uniform(-10, 10), 'y': random.uniform(-10, 10), 'vx': 0, 'vy': 0, 'inbox': [], 'faulty': False})
-    print("NODES: ", nodes)
+    faulty = i in faulty_agents
+    agents.append({'x': random.uniform(-10, 10), 'y': random.uniform(-10, 10), 'vx': 0, 'vy': 0, 'inbox': [], 'faulty': faulty})
+    print("NODES: ", agents)
     print("-----------------------------------")
 
 #--------------------------------------------------------------------------------------
 # Choose a random subset of nodes to be Byzantine
 # Arbitrary 33% case of BFT, still holds
 for i in range(100):
-    for agent in nodes:
+    for agent in agents:
         if not agent['faulty']:
             flock(agent)
-            messageBroadcast(agent, {'x': agent['x'], 'y': agent['y'], 'vx': agent['vx'], 'vy': agent['vy']})
-            messages = receiveMessages(agent)
-            for message in messages:
-                if checkByzantine(message):
-                    agent['faulty'] = True
-                    break
+            # broadcastMessage(agent, {'x': agent['x'], 'y': agent['y']})
+            multicastMessage(agent, {'x': agent['x'], 'y': agent['y']})
             if not agent['faulty']:
                 recover(agent)
             agent['x'] += agent['vx']
